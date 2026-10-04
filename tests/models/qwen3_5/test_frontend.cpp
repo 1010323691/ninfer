@@ -23,6 +23,7 @@
 #include <future>
 #include <iostream>
 #include <iterator>
+#include <locale>
 #include <memory>
 #include <span>
 #include <string>
@@ -429,6 +430,23 @@ int test_declared_frontend_semantics() {
                                    fixture_byte_token('C'), fixture_byte_token(' '),
                                    fixture_byte_token(0xc3), fixture_byte_token(0xa9)},
               "declared NFC/ByteLevel tokenizer did not preserve case and compose Unicode");
+    const auto& ascii = std::use_facet<std::ctype<char>>(std::locale::classic());
+    std::string ascii_text;
+    for (int codepoint = 0; codepoint < 128; ++codepoint) {
+        ascii_text.push_back(static_cast<char>(codepoint));
+    }
+    for (std::size_t offset = 0; offset < ascii_text.size(); ++offset) {
+        namespace unicode = ninfer::text::unicode_internal;
+        const auto value  = unicode::utf8_codepoint_at(ascii_text, offset, "ASCII test");
+        const auto byte   = ascii_text[offset];
+        failures += check(
+            value.value == byte && value.offset == offset && value.length == 1 &&
+                unicode::is_letter(value.value) == ascii.is(std::ctype_base::alpha, byte) &&
+                unicode::is_number(value.value) == ascii.is(std::ctype_base::digit, byte) &&
+                unicode::is_whitespace(value.value) == ascii.is(std::ctype_base::space, byte) &&
+                !unicode::is_mark(value.value),
+            "ASCII decoding or Unicode classification differs from classic character semantics");
+    }
     for (const auto& [path, value] : std::vector<std::pair<const char*, nlohmann::json>>{
              {"/normalizer/type", "Lowercase"},
              {"/pre_tokenizer/pretokenizers/0/pattern/Regex", "\\w+"},
@@ -511,22 +529,65 @@ int test_bpe_merge_order() {
     const std::string tokenizer_json = nlohmann::json{
         {"model",
          {{"type", "BPE"},
-          {"vocab", {{"a", 0}, {"aa", 1}, {"aaa", 2}, {"b", 3}, {"c", 4}, {"bc", 5}, {"abc", 6}}},
+          {"vocab",
+           {{"a", 0}, {"aa", 1}, {"aaa", 2}, {"b", 3}, {"c", 4}, {"bc", 5}, {"abc", 6}, {"Ċ", 7}}},
           {"merges",
            nlohmann::json::array(
                {nlohmann::json::array({"a", "a"}), nlohmann::json::array({"aa", "a"}),
                 nlohmann::json::array({"b", "c"}), nlohmann::json::array({"a", "bc"})})}}},
         {"added_tokens",
-         nlohmann::json::array()}}.dump();
+         nlohmann::json::array(
+             {added(8, "<sep>", true)})}}.dump();
     const std::string tokenizer_config_json =
         nlohmann::json{{"added_tokens_decoder", nlohmann::json::object()}}.dump();
     const fi::Tokenizer tokenizer({.tokenizer_json         = tokenizer_json,
                                    .tokenizer_config_json  = tokenizer_config_json,
                                    .generation_config_json = R"({"eos_token_id":0})"});
-    return check(tokenizer.encode("aaa") == std::vector<int>{2} &&
-                     tokenizer.encode("aaaa") == std::vector<int>({1, 1}) &&
-                     tokenizer.encode("abc") == std::vector<int>{6},
-                 "priority BPE changed rank or leftmost merge semantics");
+    int failures     = check(tokenizer.encode("aaa") == std::vector<int>{2} &&
+                                 tokenizer.encode("aaaa") == std::vector<int>({1, 1}) &&
+                                 tokenizer.encode("abc") == std::vector<int>{6},
+                             "priority BPE changed rank or leftmost merge semantics");
+    const auto naive = [](std::string_view text) {
+        std::vector<int> symbols;
+        for (const char ch : text) symbols.push_back(ch == 'a' ? 0 : ch == 'b' ? 3 : 4);
+        constexpr std::array<std::array<int, 3>, 4> rules{
+            {{0, 0, 1}, {1, 0, 2}, {3, 4, 5}, {0, 5, 6}}};
+        for (;;) {
+            bool merged = false;
+            // Scan rules by rank, then pairs from left to right, independently of the heap.
+            for (const auto& rule : rules) {
+                for (std::size_t i = 0; i + 1 < symbols.size(); ++i) {
+                    if (symbols[i] != rule[0] || symbols[i + 1] != rule[1]) continue;
+                    symbols[i] = rule[2];
+                    symbols.erase(symbols.begin() + static_cast<std::ptrdiff_t>(i + 1));
+                    merged = true;
+                    break;
+                }
+                if (merged) break;
+            }
+            if (!merged) return symbols;
+        }
+    };
+    std::size_t combinations = 1;
+    for (std::size_t length = 1; length <= 6; ++length) {
+        combinations *= 3;
+        for (std::size_t value = 0; value < combinations; ++value) {
+            std::string word(length, 'a');
+            auto remaining = value;
+            for (char& ch : word) {
+                ch = "abc"[remaining % 3];
+                remaining /= 3;
+            }
+            auto expected     = std::vector<int>{1, 1, 7};
+            const auto middle = naive(word);
+            expected.insert(expected.end(), middle.begin(), middle.end());
+            expected.insert(expected.end(), {8, 6});
+            failures +=
+                check(tokenizer.encode("aaaa\n" + word + "<sep>abc") == expected,
+                      "BPE differs from rank/leftmost oracle across word and special boundaries");
+        }
+    }
+    return failures;
 }
 
 int test_boundary_aware_tokenization() {

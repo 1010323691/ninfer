@@ -1308,8 +1308,6 @@ private:
             request->continuation_owner =
                 resources_.adopt(*instance_.program, control.source, *request->base_plan,
                                  request->publication_order, carried, progress.retired_checkpoints);
-            slots_[control.destination.value] = request;
-            materializing_.reset();
             request->lane     = control.destination;
             request->sequence = progress.sequence;
             if (!request->sequence) {
@@ -1341,6 +1339,10 @@ private:
                     control.summary.reused_prompt_tokens;
                 // Generation start was published when the first binding obtained its resources.
             }
+            finish_engine_phase(boundary, EngineHostPhase::Boundary);
+            slots_[control.destination.value] = request;
+            materializing_.reset();
+            boundary = begin_host_phase();
         } else if (context_owner_) {
             const auto request = context_owner_;
             if (request->model_state == EngineRequestState::Pausing) {
@@ -1365,9 +1367,11 @@ private:
                 // Yielding a borrower may unblock an older suspended request. The newly
                 // paused request itself waits for a later event, avoiding immediate churn.
                 if (paused_.front() != request) { scheduler_.capacity_released(); }
+                finish_engine_phase(boundary, EngineHostPhase::Boundary);
                 slots_[lane].reset();
                 request->lane.reset();
                 request->sequence.reset();
+                boundary = begin_host_phase();
             } else {
                 if (progress.published) {
                     ++cumulative_stats_.active_captures_completed;
@@ -1646,7 +1650,9 @@ private:
         }
     }
 
-    void reserve_resident_units() {
+    enum class ReservationScope { Round, Prefill };
+
+    void reserve_resident_units(ReservationScope scope = ReservationScope::Round) {
         runnable_units_.fill(false);
         std::optional<std::uint32_t> recovering;
         std::optional<std::uint32_t> oldest;
@@ -1671,7 +1677,8 @@ private:
                 instance_.program->context_blocks(*request->sequence)) {
                 continue;
             }
-            if (request->is_control_ready() || request->is_decode_ready() || prefill == lane) {
+            if (prefill == lane || (scope == ReservationScope::Round &&
+                                    (request->is_control_ready() || request->is_decode_ready()))) {
                 candidates.push_back(lane);
             }
         }
@@ -1948,6 +1955,7 @@ private:
                     ((admission_decision_ && admission_decision_->restoring) ||
                      scheduler_.should_restore(!paused_.empty(), resident_empty()))) {
                     (void)try_admit_one(true);
+                    executed |= progress_context_transaction(boundary);
                 }
                 reserve_resident_units();
                 // A failed restore leaves spare resources available to fresh requests.
@@ -1959,6 +1967,10 @@ private:
                     if (admission_decision_ || scheduler_.admission_scan_pending()) {
                         (void)try_admit_one(false);
                     }
+                }
+                if (instance_.program->has_context_transaction()) {
+                    executed |= progress_context_transaction(boundary);
+                    if (!instance_.program->has_context_transaction()) { reserve_resident_units(); }
                 }
                 const auto cancelled = snapshot_cancellations();
                 auto controls = scheduler_.build_control_membership(slots_, max_concurrency_);
@@ -2006,6 +2018,17 @@ private:
                     run_decode_round(decode, cancelled);
                     executed = true;
                 }
+                if (instance_.program->has_context_transaction()) {
+                    set_host_work_class(HostWorkClass::Control);
+                    auto progress_boundary = begin_host_phase();
+                    executed |= progress_context_transaction(progress_boundary);
+                    if (!instance_.program->has_context_transaction()) {
+                        // Control/Decode permits were consumed. Only the still-unexecuted
+                        // Prefill/Replay turn can receive a new permit in this round.
+                        reserve_resident_units(ReservationScope::Prefill);
+                    }
+                    finish_engine_phase(progress_boundary, EngineHostPhase::Boundary);
+                }
                 auto prefill_slots = slots_;
                 for (std::uint32_t lane = 0; lane < max_concurrency_; ++lane) {
                     if (!runnable_units_[lane] ||
@@ -2036,7 +2059,7 @@ private:
                             request->model_state = request->resume_phase;
                         }
                     } else {
-                        run_prefill_step(*lane, cancelled);
+                        run_prefill_step(*lane, snapshot_cancellations());
                     }
                     scheduler_.prefill_executed(*lane, max_concurrency_);
                     update_recovery(request);

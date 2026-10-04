@@ -627,6 +627,16 @@ struct GenerationSchedulingObservation {
 
 using GenerationSchedulingObserver = std::function<void(const GenerationSchedulingObservation&)>;
 
+// Emitted once on the first accepted model/control token, delivered by wait() in either consumer
+// mode. Submission elapsed includes queueing and binding; preparation is reported separately.
+struct GenerationFirstTokenObservation {
+    double prepare_seconds              = 0.0;
+    double elapsed_since_submit_seconds = 0.0;
+    double queue_wait_seconds           = 0.0;
+};
+
+using GenerationFirstTokenObserver = std::function<void(const GenerationFirstTokenObservation&)>;
+
 // Observation affects only request publication. It never changes model execution, output
 // semantics, scheduling, or cache selection. Live output timings and prompt progress require a
 // Streaming consumer; phase timings and scheduling observations also support Aggregate consumers.
@@ -636,6 +646,7 @@ struct GenerationObservationOptions {
     bool prompt_progress = false;
     // Optional for either consumer mode. No scheduling events are retained when unset.
     GenerationSchedulingObserver scheduling;
+    GenerationFirstTokenObserver first_token;
 };
 
 class CancellationView {
@@ -867,6 +878,15 @@ struct RuntimeHostWorkStats {
 // decision observations. Consumers derive interval counters by subtracting two snapshots.
 struct RuntimeStats {
     RuntimeHostWorkStats host_work;
+    // Full prompt counted once when initial binding succeeds; includes reused tokens.
+    std::uint64_t prompt_tokens = 0;
+    // All committed output tokens, including the first token and Engine-injected control tokens.
+    std::uint64_t generated_tokens = 0;
+    // Native verification work, using the same acceptance semantics as SpeculativeStats.
+    std::uint64_t speculative_rounds          = 0;
+    std::uint64_t speculative_draft_tokens    = 0;
+    std::uint64_t speculative_accepted_tokens = 0;
+    std::uint64_t speculative_fallback_steps  = 0;
     // Initial prompt tokens evaluated by prefill. Reused checkpoint-prefix tokens and replay
     // recomputation are excluded; replayed_tokens separately counts that additional model work.
     std::uint64_t computed_prefill_tokens = 0;

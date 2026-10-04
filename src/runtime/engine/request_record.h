@@ -114,8 +114,8 @@ struct RequestRecord {
     using BasePlan       = typename ModelContract::RequestBasePlan;
     using SequenceHandle = typename ModelContract::SequenceHandle;
     using ResumeState    = typename ModelContract::ResumeState;
-    using StreamEvent    = std::variant<GenerationTimingObservation, OutputDelta,
-                                        std::unique_ptr<GenerationSchedulingObservation>>;
+    using StreamEvent = std::variant<GenerationTimingObservation, GenerationFirstTokenObservation,
+                                     OutputDelta, std::unique_ptr<GenerationSchedulingObservation>>;
 
     RequestRecord(std::uint64_t request_identity, std::uint64_t publication_sequence,
                   PreparedPrompt input, OutputSession output_session, PromptSummary summary,

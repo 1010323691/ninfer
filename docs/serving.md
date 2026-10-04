@@ -56,6 +56,7 @@ selected for this process.
 | Method and path | Behavior |
 |---|---|
 | `GET /health` | Engine readiness |
+| `GET /metrics` | Prometheus counters, gauges and latency histograms |
 | `GET /v1/models` | configured OpenAI model alias and effective `max_model_len` |
 | `GET /v1/models/{id}` | lookup of the configured alias and effective `max_model_len` |
 | `POST /v1/chat/completions` | OpenAI-style chat generation |
@@ -832,6 +833,48 @@ complete fields and full precision. Operational records never contain prompts, g
 request bodies, credentials, or arbitrary client error messages.
 If a tool marker is returned to text because its structure or tool identity cannot be represented,
 Serve emits one warning with only the failure classification, never the generated markup.
+
+## Live metrics
+
+`GET /metrics` serves Prometheus text format 0.0.4 on the same port. It follows the server's
+API-key authentication and works independently of `--request-log-jsonl` and
+`--log-stats-interval-ms`. Engine failure leaves the endpoint readable with
+`ninfer_engine_ready 0`. Counters start after startup warmup and reset when the server restarts.
+
+```bash
+curl http://127.0.0.1:8080/metrics
+```
+
+| Metrics | Meaning |
+|---|---|
+| `ninfer_model_info`, `ninfer_max_concurrency`, `ninfer_max_context_tokens` | Model/backend identity and startup limits |
+| `ninfer_requests_running`, `waiting`, `paused`, `prefilling`, `decode_ready`, `replaying`, `materializing` | Current Engine gauges; prefill/decode/replay are subsets of resident requests |
+| `ninfer_prompt_tokens_total`, `ninfer_prompt_tokens_cached_total` | Full input and reused tokens counted once on initial binding |
+| `ninfer_prefill_tokens_total`, `ninfer_replayed_tokens_total` | Actual initial prefill and separate recovery recomputation |
+| `ninfer_generation_tokens_total`, `ninfer_decode_tokens_total` | All committed outputs, or decode/control outputs excluding the first token; include thinking and injected control tokens |
+| `ninfer_spec_decode_{rounds,draft_tokens,accepted_tokens,fallback_steps}_total` | Live native speculative work, including MTP and DFlash/DFlash2 |
+| `ninfer_{preemptions,snapshot_restores,replay_restores}_total` | Pressure pauses and recovery routes |
+| `ninfer_device_kv_{used,capacity}_pages`, `ninfer_device_state_{used,capacity}_slots` | Physical Main KV and StateImage occupancy; retained history also occupies these pools |
+| `ninfer_host_context_{used,reserved,capacity,peak}_bytes` | Unified Host backing; reserved bytes are already included in used bytes |
+| `ninfer_context_transfer_bytes_total{resource,direction}` | Actual State/Main KV/backend KV payload transfers |
+| `ninfer_host_work_seconds_total{phase}`, `ninfer_device_wait_seconds_total` | Instrumented worker wall time; device wait is not CUDA kernel time |
+| `ninfer_requests_total{outcome}`, `ninfer_response_failures_total` | Generation attempts entering preparation and subsequent response failures; protocol/model validation failures and token-count requests are excluded |
+| `ninfer_time_to_first_token_seconds` | Histogram updated once at the first committed token, including preparation, queueing and binding |
+| `ninfer_request_duration_seconds`, `ninfer_request_queue_seconds` | Histograms for settled generation outcomes, including cancellation; exceptional failures have separate counts |
+
+Histograms expose `_bucket`, `_sum` and `_count`. Metrics have bounded labels; they do not retain
+request IDs or request text. Rates are calculated by the consumer, for example:
+
+```promql
+rate(ninfer_generation_tokens_total[1m])
+
+rate(ninfer_spec_decode_accepted_tokens_total[1m])
+/ rate(ninfer_spec_decode_draft_tokens_total[1m])
+```
+
+The handler copies published snapshots and formats them outside the Engine worker. Scraping does
+not reset counters or initiate device work. Detailed per-request records remain available through
+the JSONL log. Monitoring tools with engine-specific metric names need an NInfer adapter.
 
 ## Structured request log
 

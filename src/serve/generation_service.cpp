@@ -370,6 +370,14 @@ PreparedRequest GenerationService::prepare_impl(const GenerationRequest& request
         prepared.preparation   = prompt.preparation_stats();
         prepared.prepare_seconds =
             std::chrono::duration<double>(Clock::now() - prepared.lifetime->started).count();
+        if (observation.first_token) {
+            observation.first_token = [callback = std::move(observation.first_token),
+                                       seconds  = prepared.prepare_seconds](
+                                          ninfer::GenerationFirstTokenObservation first) {
+                first.prepare_seconds = seconds;
+                callback(first);
+            };
+        }
         prepared.generation = engine_->submit(std::move(prompt), std::move(request_options),
                                               consumer_mode == GenerationConsumerMode::Streaming
                                                   ? ninfer::OutputConsumerMode::Streaming

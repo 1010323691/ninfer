@@ -433,6 +433,13 @@ private:
                         scheduling_failed = true;
                         fail_consumer();
                     }
+                } else if (const auto* first_token =
+                               std::get_if<GenerationFirstTokenObservation>(&event)) {
+                    if (caller_error == nullptr) {
+                        try {
+                            request->observation.first_token(*first_token);
+                        } catch (...) { fail_consumer(); }
+                    }
                 } else if (caller_error == nullptr && sink != nullptr) {
                     try {
                         if (auto* timing = std::get_if<GenerationTimingObservation>(&event)) {
@@ -499,11 +506,31 @@ private:
     record_committed_output(const std::shared_ptr<Request>& request,
                             std::uint32_t accepted_tokens) {
         if (accepted_tokens == 0) { return std::nullopt; }
+        cumulative_stats_.generated_tokens += accepted_tokens;
         const bool observe_wall =
             request->observation.phase_timings || request->observation.live_timings;
         const bool need_now         = !request->first_token || observe_wall;
         const Clock::time_point now = need_now ? Clock::now() : Clock::time_point{};
-        if (!request->first_token) { request->first_token = now; }
+        if (!request->first_token) {
+            request->first_token = now;
+            if (request->observation.first_token) {
+                GenerationFirstTokenObservation observation{
+                    .prepare_seconds = request->prepare_seconds,
+                    .elapsed_since_submit_seconds =
+                        std::chrono::duration<double>(now - request->submitted).count(),
+                    .queue_wait_seconds = request->admitted_at
+                                              ? std::chrono::duration<double>(
+                                                    *request->admitted_at - request->submitted)
+                                                    .count()
+                                              : 0.0,
+                };
+                {
+                    std::lock_guard lock(request->mutex);
+                    request->events.emplace_back(observation);
+                }
+                request->cv.notify_one();
+            }
+        }
         if (!observe_wall) { return std::nullopt; }
         if (!request->admitted_at || !request->first_token) {
             throw std::logic_error("committed output has no observed admission boundary");
@@ -1036,7 +1063,20 @@ private:
             [](const CommitDecision& decision) { return decision.terminal; });
 
         for (std::size_t row = 0; row < row_count; ++row) {
-            const auto& request = slots_[lane_indices[row]];
+            const auto& request  = slots_[lane_indices[row]];
+            auto& observed       = request->speculative_stats;
+            const auto& counters = committed.rows[row].speculative_counters;
+            cumulative_stats_.speculative_rounds += counters.rounds - observed.rounds;
+            cumulative_stats_.speculative_draft_tokens +=
+                counters.drafted_tokens - observed.drafted_tokens;
+            cumulative_stats_.speculative_accepted_tokens +=
+                counters.accepted_tokens - observed.accepted_tokens;
+            cumulative_stats_.speculative_fallback_steps +=
+                counters.fallback_steps - observed.fallback_steps;
+            observed.rounds          = counters.rounds;
+            observed.drafted_tokens  = counters.drafted_tokens;
+            observed.accepted_tokens = counters.accepted_tokens;
+            observed.fallback_steps  = counters.fallback_steps;
             if (cancelled[row]) {
                 request->generation_timings = committed.rows[row].timings;
                 request->speculative_stats  = std::move(committed.rows[row].speculative);
@@ -1354,6 +1394,7 @@ private:
                     ++cumulative_stats_.root_selections;
                 }
                 cumulative_stats_.reused_prompt_tokens += control.summary.reused_prompt_tokens;
+                cumulative_stats_.prompt_tokens += control.summary.prompt_tokens;
                 cumulative_stats_.last_selected_frontier_tokens =
                     control.summary.reused_prompt_tokens;
                 // Generation start was published when the first binding obtained its resources.

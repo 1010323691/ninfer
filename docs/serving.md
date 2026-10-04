@@ -155,9 +155,9 @@ server-error codes. Failures in the normalized prompt contract use `invalid_prom
 and availability failures retain their dedicated codes. Internal invariant failures are not
 relabeled as client input errors.
 
-The request `model` must equal the public model ID: the artifact `identity.model_id` by default, or
-the explicit `--model-id` override. Reasoning is returned separately as `reasoning_content`; answer
-text remains in `content`.
+The request `model` must equal the public model ID: the artifact `metadata.name` by default
+(falling back to its architecture name when absent), or the explicit `--model-id` override.
+Reasoning is returned separately as `reasoning_content`; answer text remains in `content`.
 
 Across Chat Completions, Responses, and Anthropic Messages, a direct top-level tool-parameter
 `type`, or an `anyOf`/`oneOf` composed entirely of explicit primitive types, guides conversion of
@@ -975,10 +975,11 @@ deadline. Fresh requests enter in FIFO order with a bounded bypass allowance whe
 cannot fit. There is no admission ETA or unbounded overflow queue.
 
 Input memory is bounded by the outstanding-request count and the per-request
-`--max-request-mib` limit. Media requests additionally share one preparation permit, so a waiting
-media request retains the same cancellation and timeout deadline. Model output is bounded by the
-same finite request count and each request's effective output-token limit; output callbacks and
-network serialization run outside the GPU executor and do not delay formation of the next batch.
+`--max-request-mib` limit. Media preparation uses a shared permit pool sized from `--media-live-mib`
+and the maximum supported prepared-payload size per request. Waiting media requests retain the same
+cancellation and timeout deadline. Model output is bounded by the same finite request count and
+each request's effective output-token limit; output callbacks and network serialization run
+outside the GPU executor and do not delay formation of the next batch.
 
 `--max-context` is each sequence's logical ceiling. `--kv-capacity` fixes the shared Main Text KV
 pool used by active requests and retained prefixes. `auto` accounts for the complete enabled runtime

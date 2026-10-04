@@ -594,13 +594,48 @@ enum class OutputConsumerMode : std::uint8_t {
     Streaming,
 };
 
+enum class GenerationSchedulingTransition : std::uint8_t {
+    PauseStarted,
+    Paused,
+    RestoreStarted,
+    Restored,
+    ReplayComplete,
+    RecoveryComplete,
+    SnapshotRevoked,
+    Terminal,
+};
+
+enum class GenerationRecoveryRoute : std::uint8_t { None, Snapshot, Replay };
+
+// Sparse lifecycle observations captured by the Engine worker and delivered by wait() on the
+// consumer thread. Counter deltas between boundaries, less the request's own deltas, measure
+// other requests' completed work during recovery. Decode includes forced control tokens.
+struct GenerationSchedulingObservation {
+    GenerationSchedulingTransition transition = GenerationSchedulingTransition::PauseStarted;
+    GenerationRecoveryRoute route             = GenerationRecoveryRoute::None;
+    std::uint64_t engine_request_id           = 0;
+    std::uint64_t steady_ns                   = 0;
+    std::uint64_t elapsed_ns                  = 0;
+    std::uint64_t preemption_index            = 0;
+    std::uint64_t global_prefill_tokens       = 0;
+    std::uint64_t global_decode_tokens        = 0;
+    std::uint64_t global_replayed_tokens      = 0;
+    std::uint64_t request_prefill_tokens      = 0;
+    std::uint64_t request_decode_tokens       = 0;
+    std::uint64_t request_replayed_tokens     = 0;
+};
+
+using GenerationSchedulingObserver = std::function<void(const GenerationSchedulingObservation&)>;
+
 // Observation affects only request publication. It never changes model execution, output
-// semantics, scheduling, or cache selection. Live observations require a Streaming consumer;
-// phase timings may also be retained for an Aggregate terminal response.
+// semantics, scheduling, or cache selection. Live output timings and prompt progress require a
+// Streaming consumer; phase timings and scheduling observations also support Aggregate consumers.
 struct GenerationObservationOptions {
     bool phase_timings   = false;
     bool live_timings    = false;
     bool prompt_progress = false;
+    // Optional for either consumer mode. No scheduling events are retained when unset.
+    GenerationSchedulingObserver scheduling;
 };
 
 class CancellationView {

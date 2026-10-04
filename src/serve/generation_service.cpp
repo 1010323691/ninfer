@@ -305,10 +305,11 @@ PreparedRequest GenerationService::prepare(const GenerationRequest& request,
                                            ninfer::GenerationObservationOptions observation,
                                            std::function<bool()> is_cancelled,
                                            ContextCacheHints context_cache) const {
-    return prepare_impl(
-        request, consumer_mode, observation, std::move(is_cancelled), std::move(context_cache),
-        options_.allow_prefix_reuse ? CacheParticipation::ReadWrite : CacheParticipation::Disabled,
-        DeadlinePolicy::ClientPendingTimeout);
+    return prepare_impl(request, consumer_mode, std::move(observation), std::move(is_cancelled),
+                        std::move(context_cache),
+                        options_.allow_prefix_reuse ? CacheParticipation::ReadWrite
+                                                    : CacheParticipation::Disabled,
+                        DeadlinePolicy::ClientPendingTimeout);
 }
 
 PreparedRequest GenerationService::prepare_impl(const GenerationRequest& request,
@@ -373,7 +374,7 @@ PreparedRequest GenerationService::prepare_impl(const GenerationRequest& request
                                               consumer_mode == GenerationConsumerMode::Streaming
                                                   ? ninfer::OutputConsumerMode::Streaming
                                                   : ninfer::OutputConsumerMode::Aggregate,
-                                              observation, prepared.lifetime->deadline);
+                                              std::move(observation), prepared.lifetime->deadline);
         prepared.sampling   = prepared.generation.resolved_sampling();
     } catch (const ApiException&) { throw; } catch (const ninfer::RequestError& exception) {
         throw_request_error(exception);

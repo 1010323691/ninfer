@@ -840,7 +840,7 @@ in append mode and flushes every event, so successive model or MTP blocks may sh
 file. The parent directory must already exist. Failure to open the file aborts startup; the log path
 is also rejected if it resolves to the model artifact.
 
-Every line is one `ninfer_serve_request_log` schema-v23 JSON object. All events carry
+Every line is one `ninfer_serve_request_log` schema-v24 JSON object. All events carry
 `timestamp_unix_ms` and a process-unique `server_instance_id`; request IDs are monotonic only within
 that server instance. Successful request-start records include request-scoped acquisition,
 media-preprocessing wall/work, tokenizer, cache hit/miss/single-flight, and payload-size fields;
@@ -852,6 +852,7 @@ they do not infer request behavior from process-global counter deltas.
 | `request_start` | protocol, resolved sampler and seed, requested reasoning effort, actual initial thinking mode and optional budget, Responses semantic-change flag, output budget, stream/message/tool shape |
 | `request_rejected` | parsed request shape, requested reasoning effort, media-item count, `phase: "prepare"`, and the exact HTTP status/type/code/parameter/message for a synchronous preparation rejection |
 | `request_done` | finish reason, prompt/completion/cache/computed-prefill tokens, prefix reuse path, tool-call parse diagnostics, preemption/recovery counters, thinking-budget application counters, unrounded request-stage seconds, per-request Engine Host exposure, and complete speculative-decoding counters |
+| `request_scheduling` | request identity, pause/restore/recovery transitions, Snapshot revocation, Engine observation time and cumulative global/request work counters |
 | `request_error` | the resolved request configuration and the generation, cancellation, or pre-outcome transport terminal message |
 | `throughput` | interval token/decode/context-cache pressure counter deltas, authoritative worker Host-work deltas, current scheduler/resource gauges, and decode-round batch statistics |
 
@@ -870,6 +871,21 @@ as full-precision JSON numbers. Its `speculative` object contains `backend`, `dr
 derived downstream from raw token counts and seconds instead of rounded stderr strings.
 `generation.scheduling` records preemptions, snapshot/replay restores, replayed tokens, paused time
 and request-owned transfer bytes. Replay rebuilds committed state without adding new output usage.
+
+`request_scheduling` records `pause_started`, `paused`, `restore_started`, `restored`,
+`replay_complete`, `recovery_complete`, `snapshot_revoked`, and a `terminal` boundary for preempted
+requests. `preemption_index` identifies each pause cycle; `route` is `snapshot`, `replay`, or `null`
+while pause preparation has not yet selected the saved representation. `steady_ns` is captured on
+the Engine worker, and `elapsed_ns` starts at Engine submission; JSONL writes happen on the request
+consumer thread. Compare `steady_ns` rather than delivery order across requests. `restored` ends
+binding; `recovery_complete` marks the first fresh committed unit or normal terminal progress,
+not merely rebuilding the old frontier. Cancellation can end the cycle without that event.
+
+Each event's `progress` carries global and request-owned prefill, decode/control and replay token
+counters. Between two boundaries, subtract the request delta from the global delta to measure
+other requests' completed work. In particular, `restored` to `replay_complete` establishes whether
+other work advanced during Replay without relying on periodic scheduler gauges. Events are enabled
+only with request logging and add no per-token records.
 
 For `server_start.memory`, `workspace.capacity_bytes` is the only physical workspace allocation.
 When Vision is enabled, `vision_workspace` reports the aggregate prompt and maximum-item token

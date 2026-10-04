@@ -89,6 +89,8 @@ private:
     void handle_model(const httplib::Request& req, httplib::Response& res) const;
 
     void record_request_start(const RequestLogContext& context);
+    [[nodiscard]] ninfer::GenerationSchedulingObserver
+    scheduling_observer(std::uint64_t request_id, std::string http_request_id);
     void record_request_rejected(const RequestRejectionLogContext& context);
     void record_request_done(const RequestLogContext& context, const GenerationOutcome& outcome);
     void record_request_failure(const RequestLogContext& context, const RequestFailure& failure);

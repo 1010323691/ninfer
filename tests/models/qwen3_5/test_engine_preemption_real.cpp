@@ -24,7 +24,7 @@ constexpr std::uint32_t kPromptTokens    = 192;
 constexpr std::uint32_t kOutputTokens    = 256;
 constexpr std::uint32_t kCapacity        = 512;
 constexpr std::size_t kSnapshotHostBytes = 512ULL << 20;
-constexpr ninfer::GenerationObservationOptions kObservations{
+const ninfer::GenerationObservationOptions kObservations{
     .phase_timings = true, .live_timings = true, .prompt_progress = true};
 
 enum class CancelStage {

@@ -36,6 +36,7 @@ struct GenerationMetrics {
     ninfer::GenerationEngineTiming engine_timing;
     std::optional<ninfer::GenerationFirstOutputTiming> first_output_timing;
     ninfer::GenerationSchedulingStats scheduling;
+    ninfer::GenerationAdmissionStats admission;
 
     SpeculativeBackend speculative_backend    = SpeculativeBackend::None;
     std::uint32_t speculative_draft_window    = 0;

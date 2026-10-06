@@ -51,9 +51,19 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void bf16_a16_s
         for (int item = tid; item < kWeightVectors; item += Schedule::kThreads) {
             const int row = item / (kBlockK / 8);
             const int k8  = item - row * (kBlockK / 8);
-            cp_async<16, Schedule::kWeightCache>(
-                &weight_shared[row * kBlockK + bf16_mma_shared_col<Schedule>(row, k8 * 8)],
-                &weight[static_cast<std::int64_t>(row0 + row) * kHidden + group_k0 + k8 * 8]);
+            auto* dst = &weight_shared[row * kBlockK + bf16_mma_shared_col<Schedule>(row, k8 * 8)];
+            if constexpr (bf16_predicated_rows<Schedule>) {
+                const bool valid = row0 + row < rows;
+                cp_async_zfill<16, Schedule::kWeightCache>(
+                    dst,
+                    &weight[static_cast<std::int64_t>(valid ? row0 + row : 0) * kHidden + group_k0 +
+                            k8 * 8],
+                    valid ? 16 : 0);
+            } else {
+                cp_async<16, Schedule::kWeightCache>(
+                    dst,
+                    &weight[static_cast<std::int64_t>(row0 + row) * kHidden + group_k0 + k8 * 8]);
+            }
         }
 
         constexpr int kActivationVectors = kBlockTokens * (kBlockK / 8);
@@ -177,8 +187,9 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void bf16_a16_s
             }
             const int mi = fragment / kTokenMmas, ni = fragment % kTokenMmas;
             const int token = token0 + ni * 8 + 2 * lid;
-            bf16_finish_fragment<false>(destination, epilogue, row0 + mi * 16 + gid, token, sum,
-                                        rows, tokens);
+            bf16_finish_fragment<false, decltype(destination), Epilogue,
+                                 !bf16_predicated_rows<Schedule>>(
+                destination, epilogue, row0 + mi * 16 + gid, token, sum, rows, tokens);
         }
     }
 }

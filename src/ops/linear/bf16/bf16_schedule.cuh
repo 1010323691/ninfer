@@ -208,6 +208,20 @@ struct Bf16A16TmaMmaSchedule
     static_assert(BlockRows <= 256 && BlockTokens <= 256 && BlockK <= 16384);
 };
 
+// Row predicates preserve the compact physical matrix; full-tile schedules keep their fast path.
+template <class Schedule>
+struct Bf16RowTailSchedule : Schedule {
+    static constexpr bool kPredicatedRows = true;
+};
+
+template <class Schedule>
+inline constexpr bool bf16_predicated_rows = [] {
+    if constexpr (requires { Schedule::kPredicatedRows; })
+        return Schedule::kPredicatedRows;
+    else
+        return false;
+}();
+
 // Static K and optional whole-call token specialization do not restrict the generic template.
 template <class Schedule, int K, int Capacity = 0, bool ExactTokens = false>
 struct Bf16ScheduleInstance : Schedule {

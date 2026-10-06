@@ -68,10 +68,13 @@ void launch_bf16_mma_partitions(const Bf16A16Operands& p, Output output, Epilogu
     static_assert(Schedule::kThreads == Schedule::kWarpsRows * Schedule::kWarpsTokens * 32,
                   "cp.async MMA schedules must not reserve TMA producer warps");
     validate_bf16_operands<Schedule>(p);
-    if (p.rows % Schedule::kBlockRows || p.k % (Schedule::kBlockK * Splits))
+    if ((!bf16_predicated_rows<Schedule> && p.rows % Schedule::kBlockRows) ||
+        p.k % (Schedule::kBlockK * Splits))
         throw std::invalid_argument("BF16 MMA requires complete row/K tiles in every split");
     for_each_token_slice(p.tokens, Schedule::kBlockTokens, [&](int offset, int count) {
-        const auto blocks = static_cast<std::int64_t>(p.rows / Schedule::kBlockRows) *
+        const auto blocks = static_cast<std::int64_t>(bf16_predicated_rows<Schedule>
+                                                          ? div_up(p.rows, Schedule::kBlockRows)
+                                                          : p.rows / Schedule::kBlockRows) *
                             div_up(count, Schedule::kBlockTokens);
         if (blocks > 2147483647LL)
             throw std::invalid_argument("BF16 MMA grid exceeds CUDA grid.x capacity");
@@ -101,12 +104,15 @@ template <class Schedule, class Output, class Epilogue>
 void launch_bf16_a16_sliced_k_mma(const Bf16A16Operands& p, Output output, Epilogue epilogue,
                                   cudaStream_t stream) {
     validate_bf16_operands<Schedule>(p);
-    if (p.rows % Schedule::kBlockRows || p.k % Schedule::kBlockK)
+    if ((!bf16_predicated_rows<Schedule> && p.rows % Schedule::kBlockRows) ||
+        p.k % Schedule::kBlockK)
         throw std::invalid_argument("BF16 sliced-K requires complete row/K tiles");
     constexpr auto kernel = bf16_a16_sliced_k_mma_kernel<Schedule, Output, Epilogue>;
     const int bytes       = bf16_prepare_shared<Schedule::kSharedBytes, kernel>();
     for_each_token_slice(p.tokens, Schedule::kBlockTokens, [&](int offset, int count) {
-        const dim3 grid(p.rows / Schedule::kBlockRows, div_up(count, Schedule::kBlockTokens));
+        const dim3 grid(bf16_predicated_rows<Schedule> ? div_up(p.rows, Schedule::kBlockRows)
+                                                       : p.rows / Schedule::kBlockRows,
+                        div_up(count, Schedule::kBlockTokens));
         kernel<<<grid, Schedule::kThreads, bytes, stream>>>(p.x, p.weight, output, epilogue, p.rows,
                                                             p.k, p.tokens, offset);
         CUDA_CHECK(cudaGetLastError());

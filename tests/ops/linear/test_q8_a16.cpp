@@ -1,10 +1,12 @@
 #include "ops/linear/linear_test_common.h"
 
+#include <algorithm>
 #include <array>
 #include <exception>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -22,9 +24,9 @@ constexpr std::array kGeometries{
     Geometry{2048, 4608, 271U},  Geometry{2048, 16384, 283U}, Geometry{2560, 6144, 307U},
     Geometry{4608, 4608, 277U},  Geometry{5120, 4608, 281U},  Geometry{5120, 6144, 239U},
     Geometry{5120, 10240, 211U}, Geometry{5120, 17408, 241U}, Geometry{5120, 25600, 293U},
-    Geometry{6144, 5120, 227U},  Geometry{9216, 2048, 263U},  Geometry{12288, 2048, 269U},
-    Geometry{12288, 2560, 313U}, Geometry{14336, 5120, 229U}, Geometry{34816, 5120, 233U},
-    Geometry{248320, 5120, 197U}};
+    Geometry{6144, 5120, 227U},  Geometry{9216, 2048, 263U},  Geometry{10240, 2560, 331U},
+    Geometry{12288, 2048, 269U}, Geometry{12288, 2560, 313U}, Geometry{14336, 5120, 229U},
+    Geometry{34816, 5120, 233U}, Geometry{248320, 5120, 197U}};
 
 int q8_workspace_domain(std::int32_t n, std::int32_t k) {
     int failures = 0;
@@ -49,9 +51,15 @@ int q8_workspace_domain(std::int32_t n, std::int32_t k) {
     return failures;
 }
 
-int q8_a16_conformance() {
+int q8_a16_conformance(std::int32_t selected_n = 0, std::int32_t selected_k = 0) {
+    if (selected_n != 0 &&
+        std::none_of(kGeometries.begin(), kGeometries.end(), [&](const Geometry& shape) {
+            return shape.n == selected_n && shape.k == selected_k;
+        }))
+        throw std::invalid_argument("Q8 test: unknown geometry");
     int failures = 0;
     for (const auto& shape : kGeometries) {
+        if (selected_n != 0 && (shape.n != selected_n || shape.k != selected_k)) continue;
         std::vector<Invocation> calls;
         // Cover live-column tails and the transitions from K-split to tiled contractions.
         for (int t : {1,  2,  3,  4,  5,  7,  8,  9,  15,  16,  17,  23,  24,  25,
@@ -77,7 +85,16 @@ int q8_a16_conformance() {
             for (int t : {34, 80, 112, 512, 1024, 1025})
                 calls.push_back({t, CallForm::A16Convenience});
         }
-        if ((shape.n == 2560 && shape.k == 6144) || (shape.n == 12288 && shape.k == 2560)) {
+        if (shape.n == 10240 && shape.k == 2560) {
+            for (int t : {66, 67, 68, 512, 1025}) calls.push_back({t});
+            for (int t : {17, 24, 25, 32, 33,  40,  41,  48,  49,   64,  65,
+                          67, 68, 96, 97, 127, 128, 129, 512, 1024, 1025})
+                calls.push_back({t, CallForm::Policy, ninfer::ops::LinearPolicy::A16Only, true});
+            for (int t : {24, 32, 40, 48, 67, 96, 127, 128, 512, 1024, 1025})
+                calls.push_back({t, CallForm::A16Convenience});
+        }
+        if ((shape.n == 2560 && shape.k == 6144) || (shape.n == 12288 && shape.k == 2560) ||
+            (shape.n == 10240 && shape.k == 2560)) {
             failures += q8_workspace_domain(shape.n, shape.k);
             failures += verify_workspace_envelopes(ninfer::QType::Q8_G32_FP16, shape.n, shape.k);
         }
@@ -114,21 +131,31 @@ int q8_a16_conformance() {
                               {shape.n, shape.k, shape.seed, Comparison::Sampled, true, calls});
     }
     const std::array full_calls{Invocation{1}, Invocation{4}, Invocation{8}};
-    failures += run_shape("Q8_A16 full", ActivationCompute::A16, make_q8_g32_fp16_weight,
-                          {2560, 6144, 311U, Comparison::Full, true, full_calls});
-    failures += run_shape("Q8_A16 full", ActivationCompute::A16, make_q8_g32_fp16_weight,
-                          {12288, 2560, 317U, Comparison::Full, true, full_calls});
+    for (const Geometry shape :
+         {Geometry{2560, 6144, 311U}, Geometry{12288, 2560, 317U}, Geometry{10240, 2560, 337U}}) {
+        if (selected_n != 0 && (shape.n != selected_n || shape.k != selected_k)) continue;
+        failures += run_shape("Q8_A16 full", ActivationCompute::A16, make_q8_g32_fp16_weight,
+                              {shape.n, shape.k, shape.seed, Comparison::Full, true, full_calls});
+    }
     return failures;
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     if (!ninfer::test::linear::cuda_available()) {
         std::cout << "SKIP: no usable CUDA device\n";
         return 77;
     }
     try {
-        const int failures = q8_a16_conformance();
+        std::int32_t n = 0, k = 0;
+        if (argc == 4 && std::string_view(argv[1]) == "--shape") {
+            n = std::stoi(argv[2]);
+            k = std::stoi(argv[3]);
+            if (n <= 0 || k <= 0) throw std::invalid_argument("Q8 test: positive N/K required");
+        } else if (argc != 1) {
+            throw std::invalid_argument("usage: ninfer_linear_q8_a16_test [--shape N K]");
+        }
+        const int failures = q8_a16_conformance(n, k);
         std::cout << (failures == 0 ? "OK" : "FAIL") << " Q8_A16 Linear\n";
         return failures == 0 ? 0 : 1;
     } catch (const std::exception& error) {

@@ -298,6 +298,7 @@ constexpr std::array kNewGeometries{
     Geometry{248320, 2560, {1, 8, 16, 32, 64, 96}},
     Geometry{13952, 2560, {1, 8, 16, 32, 48, 64, 96, 128, 512}},
     Geometry{2560, 6144, {1, 8, 16, 32, 64, 96, 128, 512}},
+    Geometry{2560, 2560, {1, 8, 32, 48, 64, 96, 128, 512, 2048}},
 };
 
 ninfer::test::quantized_weight::PackedWeight cancellation_weight(int n, int k, std::uint32_t seed) {
@@ -346,6 +347,7 @@ int run_new_bf16_geometry(const Geometry& shape) {
             points.insert(t);
     }
     points.insert({129, 256, 512, 1024, 1025});
+    if (shape.n == 2560 && shape.k == 2560) points.insert({2048, 4096});
     for (int end : shape.boundaries)
         for (int t : {end - step, end, end + step})
             if (t >= step && t <= maximum) points.insert(t);
@@ -360,6 +362,12 @@ int run_new_bf16_geometry(const Geometry& shape) {
         if (end >= step) calls.push_back({end, CallForm::A16Convenience});
     }
     for (int t : {step, 4, 8, 128, 512, 1024}) calls.push_back({t, CallForm::A16Convenience});
+    if (shape.n == 2560 && shape.k == 2560) {
+        for (int t : {2048, 4096}) {
+            calls.push_back({t, CallForm::Policy, ops::LinearPolicy::A16Only, true});
+            calls.push_back({t, CallForm::A16Convenience});
+        }
+    }
     calls.push_back({17, CallForm::Policy, ops::LinearPolicy::AllowA8});
     calls.push_back({64, CallForm::Policy, ops::LinearPolicy::AllowA4});
     const std::uint32_t seed = static_cast<std::uint32_t>(shape.n + shape.k + 431);

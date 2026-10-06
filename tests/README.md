@@ -95,6 +95,12 @@ For a change confined to one Q8 geometry, use the same public conformance cases 
 `./build/tests/ninfer_linear_q8_a16_test --shape N K`. The default CTest invocation still covers
 all registered Q8 geometries.
 
+For a change confined to a newly supported BF16 geometry, use
+`./build/tests/ninfer_linear_bf16_a16_test --shape N K`. These cases use the common full-K FP64
+oracle with exact BF16 weights, complete output checks for small N, route boundaries, changed-input
+Graph replay, both public overloads, workspace domains, and preservation/guard checks. The small
+control projections also cover terminal-K pulses and paired cancellation.
+
 All Linear files use `ops/linear/linear_test_common.{h,cpp}` and the same
 `ops/quantized_weight.h` fixture as the fused projection tests. The fixture produces the complete
 packed GPU payload and exact-decodes the logical float rows used by the one

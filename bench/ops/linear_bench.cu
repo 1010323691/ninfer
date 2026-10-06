@@ -574,8 +574,8 @@ double registered_tensor_peak_tflops(const BenchPoint& point, const char*& profi
         profile = "MXFP8_F32ACC";
         return kRtx5090MxFp8Fp32AccumulateTFLOPs;
     }
-    if (point.qtype == QType::BF16 && point.policy == LinearPolicy::A16Only && point.n == 256 &&
-        point.k == 5120) {
+    if (point.qtype == QType::BF16 && ((point.n == 256 && point.k == 5120) ||
+                                       (point.n == 48 && point.k == 2560 && point.t >= 17))) {
         profile = "BF16_F32ACC";
         return kRtx5090Bf16Fp32AccumulateTFLOPs;
     }

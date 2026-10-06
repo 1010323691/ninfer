@@ -18,4 +18,6 @@ namespace ninfer::ops::detail {
 
 [[nodiscard]] Bf16Launch select_bf16_n13952_k2560(std::int32_t tokens);
 
+[[nodiscard]] Bf16Launch select_bf16_n2560_k6144(std::int32_t tokens);
+
 } // namespace ninfer::ops::detail

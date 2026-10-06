@@ -224,7 +224,7 @@ inline constexpr bool bf16_predicated_rows = [] {
         return false;
 }();
 
-// Packed SIMT reductions may mask the final warp-sized K phase without padding storage.
+// K predicates zero-fill the final vector/tile without padding the compact physical rows.
 template <class Schedule>
 struct Bf16KTailSchedule : Schedule {
     static constexpr bool kPredicatedK = true;

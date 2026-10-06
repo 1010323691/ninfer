@@ -546,6 +546,10 @@ std::string join_labels(const std::vector<std::string>& labels) {
 double registered_tensor_peak_tflops(const BenchPoint& point, const char*& profile) {
     // Report Tensor Core utilization only when the exact registered problem and extent determine
     // that the public route executes the named MMA profile.
+    if (point.qtype == QType::Q8_G32_FP16 && point.n == 2560 && point.k == 6144 && point.t > 1) {
+        profile = "BF16_F32ACC";
+        return kRtx5090Bf16Fp32AccumulateTFLOPs;
+    }
     if (point.qtype == QType::FP8_E4M3FN_ROW_BF16 &&
         (((point.n == 14336 || point.n == 16384) && point.k == 5120) ||
          (point.n == 5120 && (point.k == 6144 || point.k == 17408))) &&

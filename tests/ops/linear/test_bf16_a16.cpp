@@ -289,6 +289,7 @@ struct Geometry {
 
 constexpr std::array kNewGeometries{
     Geometry{48, 2560, {1, 8, 12, 16, 128}},
+    Geometry{96, 2560, {1, 4, 16, 128, 512}},
 };
 
 ninfer::test::quantized_weight::PackedWeight cancellation_weight(int n, int k, std::uint32_t seed) {
@@ -372,7 +373,7 @@ int run_new_bf16_geometry(const Geometry& shape) {
                                shape.n <= 640 ? Comparison::Full : Comparison::Sampled, true, tail,
                                ActivationPattern::KTail});
     }
-    if (shape.n <= 48) {
+    if (shape.n <= 96) {
         const std::array cancel{Invocation{1}, Invocation{4}, Invocation{8}, Invocation{128},
                                 Invocation{8, CallForm::Policy, ops::LinearPolicy::A16Only, true}};
         failures += run_shape("BF16_A16 cancellation", ActivationCompute::A16, cancellation_weight,

@@ -24,9 +24,9 @@ constexpr std::array kGeometries{
     Geometry{2048, 4608, 271U},  Geometry{2048, 16384, 283U}, Geometry{2560, 6144, 307U},
     Geometry{4608, 4608, 277U},  Geometry{5120, 4608, 281U},  Geometry{5120, 6144, 239U},
     Geometry{5120, 10240, 211U}, Geometry{5120, 17408, 241U}, Geometry{5120, 25600, 293U},
-    Geometry{6144, 5120, 227U},  Geometry{9216, 2048, 263U},  Geometry{10240, 2560, 331U},
-    Geometry{12288, 2048, 269U}, Geometry{12288, 2560, 313U}, Geometry{14336, 5120, 229U},
-    Geometry{34816, 5120, 233U}, Geometry{248320, 5120, 197U}};
+    Geometry{6144, 2560, 347U},  Geometry{6144, 5120, 227U},  Geometry{9216, 2048, 263U},
+    Geometry{10240, 2560, 331U}, Geometry{12288, 2048, 269U}, Geometry{12288, 2560, 313U},
+    Geometry{14336, 5120, 229U}, Geometry{34816, 5120, 233U}, Geometry{248320, 5120, 197U}};
 
 int q8_workspace_domain(std::int32_t n, std::int32_t k) {
     int failures = 0;
@@ -93,8 +93,16 @@ int q8_a16_conformance(std::int32_t selected_n = 0, std::int32_t selected_k = 0)
             for (int t : {24, 32, 40, 48, 67, 96, 127, 128, 512, 1024, 1025})
                 calls.push_back({t, CallForm::A16Convenience});
         }
+        if (shape.n == 6144 && shape.k == 2560) {
+            for (int t : {94, 112, 113, 512, 513, 1025}) calls.push_back({t});
+            for (int t : {17, 24, 25,  32,  33,  40,  41,  64,  65,  80,   81,  95,
+                          96, 97, 112, 113, 127, 128, 129, 512, 513, 1024, 1025})
+                calls.push_back({t, CallForm::Policy, ninfer::ops::LinearPolicy::A16Only, true});
+            for (int t : {24, 32, 40, 64, 80, 96, 112, 127, 128, 512, 1024, 1025})
+                calls.push_back({t, CallForm::A16Convenience});
+        }
         if ((shape.n == 2560 && shape.k == 6144) || (shape.n == 12288 && shape.k == 2560) ||
-            (shape.n == 10240 && shape.k == 2560)) {
+            (shape.n == 10240 && shape.k == 2560) || (shape.n == 6144 && shape.k == 2560)) {
             failures += q8_workspace_domain(shape.n, shape.k);
             failures += verify_workspace_envelopes(ninfer::QType::Q8_G32_FP16, shape.n, shape.k);
         }
@@ -131,8 +139,8 @@ int q8_a16_conformance(std::int32_t selected_n = 0, std::int32_t selected_k = 0)
                               {shape.n, shape.k, shape.seed, Comparison::Sampled, true, calls});
     }
     const std::array full_calls{Invocation{1}, Invocation{4}, Invocation{8}};
-    for (const Geometry shape :
-         {Geometry{2560, 6144, 311U}, Geometry{12288, 2560, 317U}, Geometry{10240, 2560, 337U}}) {
+    for (const Geometry shape : {Geometry{2560, 6144, 311U}, Geometry{12288, 2560, 317U},
+                                 Geometry{10240, 2560, 337U}, Geometry{6144, 2560, 349U}}) {
         if (selected_n != 0 && (shape.n != selected_n || shape.k != selected_k)) continue;
         failures += run_shape("Q8_A16 full", ActivationCompute::A16, make_q8_g32_fp16_weight,
                               {shape.n, shape.k, shape.seed, Comparison::Full, true, full_calls});

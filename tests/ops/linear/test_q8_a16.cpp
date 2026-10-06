@@ -23,23 +23,25 @@ constexpr std::array kGeometries{
     Geometry{4608, 4608, 277U},  Geometry{5120, 4608, 281U},  Geometry{5120, 6144, 239U},
     Geometry{5120, 10240, 211U}, Geometry{5120, 17408, 241U}, Geometry{5120, 25600, 293U},
     Geometry{6144, 5120, 227U},  Geometry{9216, 2048, 263U},  Geometry{12288, 2048, 269U},
-    Geometry{14336, 5120, 229U}, Geometry{34816, 5120, 233U}, Geometry{248320, 5120, 197U}};
+    Geometry{12288, 2560, 313U}, Geometry{14336, 5120, 229U}, Geometry{34816, 5120, 233U},
+    Geometry{248320, 5120, 197U}};
 
-int q03_workspace_domain() {
+int q8_workspace_domain(std::int32_t n, std::int32_t k) {
     int failures = 0;
     for (auto policy : {ninfer::ops::LinearPolicy::A16Only, ninfer::ops::LinearPolicy::AllowA8,
                         ninfer::ops::LinearPolicy::AllowA4}) {
         if (ninfer::ops::linear_workspace_capacity_bytes(
-                ninfer::QType::Q8_G32_FP16, 2560, 6144, policy, 1,
+                ninfer::QType::Q8_G32_FP16, n, k, policy, 1,
                 std::numeric_limits<std::int32_t>::max()) != 0) {
-            std::cerr << "Q03: expected zero workspace across the positive T domain\n";
+            std::cerr << "Q8 [" << n << ',' << k
+                      << "]: expected zero workspace across the positive T domain\n";
             ++failures;
         }
         for (auto [first, last] : {std::pair{0, 1}, std::pair{-1, 8}, std::pair{8, 7}}) {
             try {
-                (void)ninfer::ops::linear_workspace_capacity_bytes(ninfer::QType::Q8_G32_FP16, 2560,
-                                                                   6144, policy, first, last);
-                std::cerr << "Q03: accepted invalid workspace interval\n";
+                (void)ninfer::ops::linear_workspace_capacity_bytes(ninfer::QType::Q8_G32_FP16, n, k,
+                                                                   policy, first, last);
+                std::cerr << "Q8 [" << n << ',' << k << "]: accepted invalid workspace interval\n";
                 ++failures;
             } catch (const std::invalid_argument&) {}
         }
@@ -48,7 +50,7 @@ int q03_workspace_domain() {
 }
 
 int q8_a16_conformance() {
-    int failures = q03_workspace_domain();
+    int failures = 0;
     for (const auto& shape : kGeometries) {
         std::vector<Invocation> calls;
         // Cover live-column tails and the transitions from K-split to tiled contractions.
@@ -65,6 +67,18 @@ int q8_a16_conformance() {
             for (int t : {4, 33, 49, 50, 51, 129, 512, 1024, 1025})
                 calls.push_back({t, CallForm::Policy, ninfer::ops::LinearPolicy::A16Only, true});
             for (int t : {40, 512, 1024, 1025}) calls.push_back({t, CallForm::A16Convenience});
+        }
+        if (shape.n == 12288 && shape.k == 2560) {
+            for (int t : {34, 35, 36, 72, 104, 105, 110, 111, 112, 113, 512, 1025})
+                calls.push_back({t});
+            for (int t : {17, 32,  34,  35,  40,  41,  64,  79,  80,   81,  96,
+                          97, 104, 110, 111, 112, 113, 129, 512, 1024, 1025})
+                calls.push_back({t, CallForm::Policy, ninfer::ops::LinearPolicy::A16Only, true});
+            for (int t : {34, 80, 112, 512, 1024, 1025})
+                calls.push_back({t, CallForm::A16Convenience});
+        }
+        if ((shape.n == 2560 && shape.k == 6144) || (shape.n == 12288 && shape.k == 2560)) {
+            failures += q8_workspace_domain(shape.n, shape.k);
             failures += verify_workspace_envelopes(ninfer::QType::Q8_G32_FP16, shape.n, shape.k);
         }
         if (shape.n == 6144 && shape.k == 5120) {
@@ -102,6 +116,8 @@ int q8_a16_conformance() {
     const std::array full_calls{Invocation{1}, Invocation{4}, Invocation{8}};
     failures += run_shape("Q8_A16 full", ActivationCompute::A16, make_q8_g32_fp16_weight,
                           {2560, 6144, 311U, Comparison::Full, true, full_calls});
+    failures += run_shape("Q8_A16 full", ActivationCompute::A16, make_q8_g32_fp16_weight,
+                          {12288, 2560, 317U, Comparison::Full, true, full_calls});
     return failures;
 }
 } // namespace

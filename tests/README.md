@@ -101,7 +101,7 @@ whole suite; private kernel, schedule, launcher, and T selection do not change i
 files call public `linear()` and contain no private selector, launcher, schedule, or kernel
 assertions.
 
-The Q8 suite includes `[2560,6144]`: full-output FP64 comparisons at T=1/4/8,
+The Q8 suite includes `[2560,6144]` and `[12288,2560]`: full-output FP64 comparisons at T=1/4/8,
 sampled-output checks at larger extents including 512/1024 and 129/1025, production boundaries,
 changed-input Graph replay, both public overloads, permissive policies, input/weight preservation,
 output guards, and valid/invalid workspace intervals.

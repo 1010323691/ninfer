@@ -113,6 +113,7 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void bf16_a16_t
     const int tid  = threadIdx.x - Schedule::kProducerThreads;
     const int warp = tid / 32, lane = tid & 31;
     float accum[Schedule::kMmaRows][Schedule::kMmaTokens][4] = {};
+#pragma unroll Schedule::kConsumerKUnroll
     for (int kt = 0; kt < tiles_k; ++kt) {
         const int stage = kt % S;
         cta_mbarrier_wait(full + stage, (kt / S) & 1U);

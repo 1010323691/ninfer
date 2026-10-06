@@ -580,6 +580,7 @@ double registered_tensor_peak_tflops(const BenchPoint& point, const char*& profi
          ((point.n == 48 || point.n == 96) && point.k == 2560 && point.t >= 17) ||
          (point.n == 1664 && point.k == 2560 && point.t >= 2) ||
          (point.n == 1152 && point.k == 1536 && point.t >= 4) ||
+         (point.n == 3456 && point.k == 1152 && point.t >= 4) ||
          (point.n == 2560 && point.k == 2560 && point.t >= 2) ||
          (point.n == 2560 && point.k == 6144 && point.t >= 2) ||
          (point.n == 13952 && point.k == 2560 && point.t >= 2) ||

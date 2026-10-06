@@ -304,6 +304,7 @@ constexpr std::array kNewGeometries{
     Geometry{2560, 2560, {1, 8, 32, 48, 64, 96, 128, 512, 2048}},
     Geometry{1152, 1536, {8, 16, 32, 64, 128, 256, 512, 1024, 2048}, ColumnDomain::RawPatch},
     Geometry{3456, 1152, {4, 16, 96, 128, 256, 512, 1024}, ColumnDomain::RawPatch},
+    Geometry{1152, 1152, {4, 16, 32, 40, 64, 128, 256, 512, 1024, 2048}, ColumnDomain::RawPatch},
 };
 
 ninfer::test::quantized_weight::PackedWeight cancellation_weight(int n, int k, std::uint32_t seed) {

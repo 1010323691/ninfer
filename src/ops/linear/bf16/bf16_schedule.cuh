@@ -166,7 +166,7 @@ template <int BlockRows, int BlockTokens, int KWarps, int WarpK = 64, int Stages
 struct Bf16A16SlicedKMmaSchedule {
     static_assert(BlockRows > 0 && BlockRows % 16 == 0);
     static_assert(BlockTokens > 0 && BlockTokens % 8 == 0);
-    static_assert(KWarps == 2 || KWarps == 4 || KWarps == 8 || KWarps == 16);
+    static_assert(KWarps > 0 && KWarps <= 32);
     static_assert(WarpK > 0 && WarpK % 64 == 0);
     static_assert(Stages >= 1 && Stages <= 8 && MinBlocksPerSm > 0);
     static constexpr int kStaticK            = 0;
@@ -218,6 +218,20 @@ template <class Schedule>
 inline constexpr bool bf16_predicated_rows = [] {
     if constexpr (requires { Schedule::kPredicatedRows; })
         return Schedule::kPredicatedRows;
+    else
+        return false;
+}();
+
+// Packed SIMT reductions may mask the final warp-sized K phase without padding storage.
+template <class Schedule>
+struct Bf16KTailSchedule : Schedule {
+    static constexpr bool kPredicatedK = true;
+};
+
+template <class Schedule>
+inline constexpr bool bf16_predicated_k = [] {
+    if constexpr (requires { Schedule::kPredicatedK; })
+        return Schedule::kPredicatedK;
     else
         return false;
 }();

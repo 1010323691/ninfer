@@ -152,8 +152,14 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void bf16_a16_s
         for (int fragment = 0; fragment < kFragments; ++fragment) {
             const std::int64_t partner_base =
                 (static_cast<std::int64_t>(warp + 1) * kFragments + fragment) * 32 * 4;
-            const float4 partner =
-                load_vec<float4>(partial + partner_base + static_cast<std::int64_t>(lane) * 4);
+            float4 partner = {};
+            if constexpr (kKWarps % 2 == 0) {
+                partner =
+                    load_vec<float4>(partial + partner_base + static_cast<std::int64_t>(lane) * 4);
+            } else if (warp + 1 < kKWarps) {
+                partner =
+                    load_vec<float4>(partial + partner_base + static_cast<std::int64_t>(lane) * 4);
+            }
             accum[fragment][0] += partner.x;
             accum[fragment][1] += partner.y;
             accum[fragment][2] += partner.z;

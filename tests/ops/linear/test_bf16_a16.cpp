@@ -293,6 +293,7 @@ constexpr std::array kNewGeometries{
     Geometry{1664, 2560, {1, 16, 48, 64, 96, 128, 512}},
     Geometry{324, 10240, {1, 8, 48, 96, 128, 512}},
     Geometry{320, 10240, {1, 8, 48, 96, 128, 512}},
+    Geometry{10240, 320, {1, 16, 48, 64, 128}},
 };
 
 ninfer::test::quantized_weight::PackedWeight cancellation_weight(int n, int k, std::uint32_t seed) {
@@ -367,7 +368,7 @@ int run_new_bf16_geometry(const Geometry& shape) {
         failures += run_shape("BF16_A16 full", ActivationCompute::A16, make_bf16_weight,
                               {shape.n, shape.k, seed + 1, Comparison::Full, true, full});
     }
-    if (shape.n <= 640) {
+    if (shape.n <= 640 || shape.k == 320 || shape.k % 64 != 0) {
         std::vector<Invocation> tail{
             {4}, {8}, {128}, {128, CallForm::Policy, ops::LinearPolicy::A16Only, true}};
         tail.insert(tail.begin(), {1});

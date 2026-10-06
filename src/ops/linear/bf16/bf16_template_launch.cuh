@@ -16,7 +16,9 @@ void launch_bf16_a16_gemv(const Bf16A16Operands& p, Output output, Epilogue epil
                           cudaStream_t stream) {
     validate_bf16_operands<Schedule>(p);
     if (p.tokens != 1 || p.rows % Schedule::kBlockRows ||
-        p.k % (Schedule::kWarpsPerRow * 32 * Schedule::kValuesPerLane))
+        p.k % (bf16_predicated_k<Schedule>
+                   ? (Schedule::kValuesPerLane < 8 ? 8 : Schedule::kValuesPerLane)
+                   : Schedule::kWarpsPerRow * 32 * Schedule::kValuesPerLane))
         throw std::invalid_argument("BF16 GEMV requires T=1 and complete row/K tiles");
     if constexpr (requires { Epilogue::kRowTokens; }) {
         static_assert(Epilogue::kRowTokens == 1, "BF16 GEMV row consumers require one token");
@@ -45,7 +47,9 @@ void launch_bf16_a16_simt(const Bf16A16Operands& p, Output output, Epilogue epil
                           cudaStream_t stream) {
     validate_bf16_operands<Schedule>(p);
     if (p.rows % Schedule::kBlockRows ||
-        p.k % (Schedule::kWarpsPerRow * 32 * Schedule::kValuesPerLane) ||
+        p.k % (bf16_predicated_k<Schedule>
+                   ? (Schedule::kValuesPerLane < 8 ? 8 : Schedule::kValuesPerLane)
+                   : Schedule::kWarpsPerRow * 32 * Schedule::kValuesPerLane) ||
         (Schedule::kTokenCapacity && p.tokens > Schedule::kTokenCapacity) ||
         (Schedule::kExactTokens && p.tokens != Schedule::kTokenCapacity))
         throw std::invalid_argument("BF16 SIMT requires complete row/K tiles and matching tokens");

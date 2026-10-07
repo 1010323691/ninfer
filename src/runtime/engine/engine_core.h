@@ -67,6 +67,10 @@ public:
                            std::span<std::uint32_t> words) override {
             return outputs[row]->grammar_masks(drafts, words);
         }
+
+        void uploaded(std::size_t row, std::size_t bytes) noexcept override {
+            outputs[row]->constraint_uploaded(bytes);
+        }
     };
 
     EngineCore(Instance& instance, DeviceContext& device, const EngineOptions& options,
@@ -199,7 +203,8 @@ public:
 
         std::shared_ptr<Request> request;
         try {
-            auto output = instance_.frontend.make_output_session(
+            const auto constraint_started = observation.phase_timings ? Clock::now() : submitted;
+            auto output                   = instance_.frontend.make_output_session(
                 prompt, options.stop, options.output, options.execution.thinking,
                 options.constraint, options.tool_choice);
             if (Clock::now() >= pending_deadline) {
@@ -216,6 +221,9 @@ public:
                                    error.what());
             }
             const auto ready = Clock::now();
+            output.observe_constraint(
+                observation.phase_timings,
+                std::chrono::duration<double>(ready - constraint_started).count());
             prepare_seconds += std::chrono::duration<double>(ready - submitted).count();
             request = std::make_shared<Request>(request_id, publication_order, std::move(prompt),
                                                 std::move(output), prompt_summary, prepare_seconds,
@@ -761,6 +769,7 @@ private:
         result.generated_token_ids             = std::move(request->generated);
         result.content                         = std::move(request->content);
         result.reasoning                       = std::move(request->reasoning);
+        result.constraint                      = request->output.constraint_observation();
         result.tool_calls                      = request->output.take_tool_calls();
         result.tool_call_parse                 = request->output.tool_call_parse_diagnostics();
         result.reasoning_tokens                = request->output.reasoning_tokens();

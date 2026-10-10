@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ninfer monitor</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="app.css">
+<script>
+  try {
+    const t = localStorage.getItem("ninfer.theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+</head>
+<body>
+<header class="st-header">
+  <span class="st-header__brand">ninfer</span>
+  <span class="muted" id="model-name"></span>
+  <span class="st-header__spacer"></span>
+  <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite">
+    <span class="st-pill__dot"></span><span id="pill-text">Connecting&hellip;</span></span>
+  <button class="st-btn st-btn--icon" id="theme-btn" title="Light / dark" aria-label="Switch between light and dark">
+    <svg class="st-icon"><use id="theme-icon" href="sprite.svg#i-moon"/></svg></button>
+</header>
+
+<main>
+  <section class="view view--monitor" id="view-monitor">
+    <div class="monitor">
+      <div class="st-card" id="notice" hidden><span id="notice-text"></span></div>
+      <div class="st-card warn-strip" id="warn-strip" hidden><span class="st-badge st-badge--queued">Reuse</span><span id="warn-text"></span></div>
+
+      <div class="st-card state-card">
+        <div class="state-card__head">
+          <span class="card-title">Model state</span>
+          <span class="badges" id="state-badges">
+            <span class="st-badge" data-s="idle">Idle</span>
+            <span class="st-badge st-badge--reading" data-s="reading">Reading</span>
+            <span class="st-badge st-badge--generating" data-s="generating">Generating</span>
+            <span class="st-badge st-badge--queued" data-s="queued">Queued</span>
+            <span class="st-badge st-badge--error" data-s="error">Error</span>
+          </span>
+        </div>
+        <div class="state-card__row"><span id="state-label">Waiting for a request</span><span class="muted" id="state-detail"></span></div>
+        <div class="st-progress" id="state-progress"><div class="st-progress__bar" id="state-bar" style="width:0%"></div></div>
+      </div>
+
+      <div class="metrics" id="metrics"></div>
+
+      <div class="monitor-row">
+        <div class="st-card ctx-card">
+          <span class="card-title">Context fill</span>
+          <div class="ctx-gauge">
+            <svg class="st-gauge" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="st-gauge__track" cx="60" cy="60" r="50" fill="none" stroke-width="10" stroke-linecap="round"
+                      stroke-dasharray="235.6 314.2" transform="rotate(135 60 60)"/>
+              <circle class="st-gauge__fill" id="ctx-fill" cx="60" cy="60" r="50" fill="none" stroke-width="10"
+                      stroke-linecap="round" stroke-dasharray="0 314.2" transform="rotate(135 60 60)"/>
+            </svg>
+            <div class="ctx-gauge__label"><span class="ctx-gauge__pct" id="ctx-pct">0%</span><span class="muted" id="ctx-sub">&ndash;</span></div>
+          </div>
+          <p class="muted small ctx-note" id="ctx-note"></p>
+          <div class="bar-row"><span title="Share of the last 20 prompts' tokens that were reused from the cache">Prefix reuse (last 20)</span><span class="muted" id="reuse-text">&ndash;</span></div>
+          <div class="st-progress"><div class="st-progress__bar" id="reuse-bar" style="width:0%"></div></div>
+          <div class="bar-row"><span title="Which cache path served the prompt prefix, last 100 requests">Reuse paths (last 100)</span><span class="muted" id="paths-sum">&ndash;</span></div>
+          <div class="paths" id="paths"><span class="muted small">&ndash;</span></div>
+          <div class="bar-row"><span>System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
+          <div class="st-progress" id="ram-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
+          <div class="bar-row"><span>GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
+          <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
+        </div>
+        <div class="st-card req-card">
+          <div class="req-head"><span class="card-title">Recent requests</span>
+            <span class="req-tools"><label class="small muted" title="Requests that wrote only a few tokens and used no tools (title generation, warm-ups)"><input type="checkbox" id="hide-aux"> Hide aux requests</label>
+            <button class="st-btn st-btn--secondary" id="req-all" hidden>Show all</button></span></div>
+          <div class="table-wrap" id="req-wrap">
+            <table class="st-table">
+              <thead><tr><th>Time</th><th>Status</th><th class="num">Prompt</th><th class="num">Reused</th><th class="num">Output</th>
+                <th class="num">Tok/s</th><th class="num" title="Share of the draft tokens the model accepted (speculative decoding)">Draft hit</th>
+                <th class="num" title="Time to first token">TTFT</th><th class="num" title="Wait in the engine queue before the request started">Queue</th>
+                <th class="num" title="Thinking tokens (share of the output on hover)">Think</th><th class="num" title="Tool calls the model made">Tools</th>
+                <th class="num" title="prepare / queue / prefill / decode; hover for the numbers">Duration</th></tr></thead>
+              <tbody id="req-body"><tr><td colspan="13" class="muted">No requests yet</td></tr></tbody>
+            </table>
+          </div>
+          <p class="muted req-totals" id="req-totals"></p>
+        </div>
+      </div>
+
+      <div class="monitor-row3">
+        <div class="st-card ana-card"><span class="card-title">Speculative decoding</span>
+          <svg class="spec-bars" id="spec-bars" viewBox="0 0 140 70" preserveAspectRatio="none" aria-label="Acceptance rate by draft position"></svg>
+          <p class="muted small" id="spec-note">&ndash;</p></div>
+        <div class="st-card ana-card"><span class="card-title">GPU wait vs host</span>
+          <div class="bar-row"><span>Device wait</span><span class="muted" id="wait-text">&ndash;</span></div>
+          <div class="st-progress" data-tone="info"><div class="st-progress__bar" id="wait-bar" style="width:0%"></div></div>
+          <div class="bar-row"><span>Host exposed</span><span class="muted" id="host-text">&ndash;</span></div>
+          <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="host-bar" style="width:0%"></div></div>
+          <p class="muted small" id="host-note"></p></div>
+        <div class="st-card ana-card"><span class="card-title">Prefill speed by prompt size</span>
+          <div id="buckets"><span class="muted small">&ndash;</span></div></div>
+        <div class="st-card ana-card"><div class="req-head"><span class="card-title">Errors</span><span class="st-badge st-badge--error" id="err-badge" hidden></span></div>
+          <p class="muted small" id="err-note">No errors</p>
+          <details id="err-details" hidden><summary class="small">Reasons</summary><div id="err-list" class="small"></div></details></div>
+      </div>
+
+      <div class="st-card cc-card">
+        <div class="req-head"><span class="card-title">Conversation cache</span><span class="muted small" id="cc-sum"></span></div>
+        <div class="cc-bars" id="cc-bars">
+          <div><div class="bar-row"><span>Device state slots</span><span class="muted" id="cc-dev-text">&ndash;</span></div>
+            <div class="st-progress"><div class="st-progress__bar" id="cc-dev-bar" style="width:0%"></div></div></div>
+          <div><div class="bar-row"><span>Host state slots</span><span class="muted" id="cc-host-text">&ndash;</span></div>
+            <div class="st-progress"><div class="st-progress__bar" id="cc-host-bar" style="width:0%"></div></div></div>
+          <div><div class="bar-row"><span>Host context memory (state + KV)</span><span class="muted" id="cc-kv-text">&ndash;</span></div>
+            <div class="st-progress"><div class="st-progress__bar" id="cc-kv-bar" style="width:0%"></div></div></div>
+          <div><div class="bar-row"><span title="Pages of the device KV pool in use (64 tokens each)">Main KV pages</span><span class="muted" id="cc-pg-text">&ndash;</span></div>
+            <div class="st-progress"><div class="st-progress__bar" id="cc-pg-bar" style="width:0%"></div></div></div>
+        </div>
+        <div class="xfer small" id="xfer"></div>
+        <p class="muted small cc-note" id="cc-note"></p>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

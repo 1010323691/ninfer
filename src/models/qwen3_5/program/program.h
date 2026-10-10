@@ -72,6 +72,8 @@ private:
 
     friend class SequencePlanner;
 
+    friend std::size_t measure_cuda_graph_allocation_bytes(const execution::Parameters&,
+                                                           DeviceContext&, const EngineOptions&);
     friend std::unique_ptr<Program> create_program(const execution::Parameters&, SequencePlan&&,
                                                    DeviceContext&, const StartupObserver&);
 };
@@ -93,7 +95,8 @@ private:
     std::unique_ptr<detail::SequencePlannerImpl> impl_;
 
     friend SequencePlanner make_sequence_planner(const execution::Parameters&, DeviceContext&,
-                                                 const EngineOptions&);
+                                                 const EngineOptions&,
+                                                 std::optional<std::size_t>);
 };
 
 class RequestBasePlan {
@@ -498,8 +501,13 @@ private:
                                                    DeviceContext&, const StartupObserver&);
 };
 
-[[nodiscard]] SequencePlanner make_sequence_planner(const execution::Parameters&, DeviceContext&,
-                                                    const EngineOptions&);
+[[nodiscard]] SequencePlanner
+make_sequence_planner(const execution::Parameters&, DeviceContext&, const EngineOptions&,
+                      std::optional<std::size_t> measured_graph_allowance_bytes = std::nullopt);
+// Startup-only calibration: bytes the driver keeps for CUDA graphs on the minimum KV pool.
+[[nodiscard]] std::size_t measure_cuda_graph_allocation_bytes(const execution::Parameters&,
+                                                              DeviceContext&,
+                                                              const EngineOptions&);
 [[nodiscard]] std::unique_ptr<Program> create_program(const execution::Parameters&, SequencePlan&&,
                                                       DeviceContext&, const StartupObserver&);
 } // namespace ninfer::models::qwen3_5

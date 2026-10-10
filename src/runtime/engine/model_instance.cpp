@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -139,23 +140,51 @@ ConstructedModel construct_model(EngineOptions& options, DeviceContext& device) 
                 context_cost_hardware_class(device.props.name, device.props.major, device.props.minor),
             .prefill_signature = signature},
         options.context_cost.preset_path);
-    auto planner    = models::qwen3_5::make_sequence_planner(instance->parameters, device, options);
-    auto resolution = resolve_kv_capacity(options.kv_capacity, planner.capacity_curve(),
-                                          current_free_device_bytes());
-    auto sequence   = std::move(planner).finalize(resolution.main_page_groups);
-    if (sequence.device_reservation_bytes() != resolution.runtime_reservation_bytes ||
-        sequence.kv_capacity() != resolution.resolved_tokens) {
-        throw std::logic_error("resolved KV capacity does not match the finalized Program plan");
-    }
-    options.context_cache.host_capacity_bytes = sequence.host_capacity_bytes();
-    instance->kv_capacity_resolution          = resolution;
+    auto graph_bytes =
+        models::qwen3_5::measure_cuda_graph_allocation_bytes(instance->parameters, device, options);
     planning.complete();
-    StartupPhaseScope program(options.startup_observer, StartupPhase::ProgramInitialize);
-    instance->program = models::qwen3_5::create_program(instance->parameters, std::move(sequence),
-                                                        device, options.startup_observer);
-    device.synchronize();
-    program.complete();
-    instance->kv_capacity_resolution.available_after_startup_bytes = current_free_device_bytes();
+    // CUDA allocation rounding can differ between the calibration and final pool.
+    // Reconcile a measured shortfall before exposing the Program to any request.
+    constexpr unsigned kMaximumSizingAttempts = 3;
+    for (unsigned attempt = 0; attempt < kMaximumSizingAttempts; ++attempt) {
+        auto planner = models::qwen3_5::make_sequence_planner(instance->parameters, device,
+                                                              options, graph_bytes);
+        auto resolution = resolve_kv_capacity(options.kv_capacity, planner.capacity_curve(),
+                                              current_free_device_bytes());
+        auto sequence   = std::move(planner).finalize(resolution.main_page_groups);
+        if (sequence.device_reservation_bytes() != resolution.runtime_reservation_bytes ||
+            sequence.kv_capacity() != resolution.resolved_tokens) {
+            throw std::logic_error("resolved KV capacity does not match the finalized Program plan");
+        }
+        options.context_cache.host_capacity_bytes = sequence.host_capacity_bytes();
+        StartupPhaseScope program(options.startup_observer, StartupPhase::ProgramInitialize);
+        instance->program = models::qwen3_5::create_program(instance->parameters,
+                                                            std::move(sequence), device,
+                                                            options.startup_observer);
+        device.synchronize();
+        program.complete();
+        resolution.available_after_startup_bytes = current_free_device_bytes();
+        if (options.kv_capacity.mode != KvCapacityMode::Automatic ||
+            resolution.available_after_startup_bytes >= resolution.automatic_headroom_bytes) {
+            instance->kv_capacity_resolution = resolution;
+            break;
+        }
+        const auto shortfall = resolution.automatic_headroom_bytes -
+                               resolution.available_after_startup_bytes;
+        // One page of extra adjustment avoids repeating an identical rounded allocation.
+        const auto correction = shortfall + resolution.bytes_per_additional_main_page_group;
+        if (correction < shortfall ||
+            graph_bytes > std::numeric_limits<std::size_t>::max() - correction) {
+            throw std::overflow_error("measured CUDA allocation allowance overflows size_t");
+        }
+        graph_bytes += correction;
+        instance->program.reset();
+        device.synchronize();
+        if (attempt + 1 == kMaximumSizingAttempts) {
+            throw std::runtime_error("automatic KV sizing could not preserve the requested "
+                                     "headroom after measured CUDA startup allocations");
+        }
+    }
     const auto& stats = instance->model->storage_stats();
     LoadSummary summary;
     summary.architecture = models::architecture_name(instance->model->config().text.architecture);

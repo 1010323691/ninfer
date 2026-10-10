@@ -890,6 +890,11 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
         }
     }
 
+    if (impl->use_cuda_graph && inputs.measured_graph_allowance_bytes) {
+        // Startup calibration replaces the static topology bounds above.
+        impl->graph_allowance_bytes = *inputs.measured_graph_allowance_bytes;
+    }
+
     impl->device_reservation_bytes = checked_add(
         checked_add(impl->persistent.bytes, impl->workspace.capacity, "sequence memory plan"),
         impl->graph_allowance_bytes, "sequence graph allowance");
@@ -900,7 +905,8 @@ std::unique_ptr<SequencePlanImpl> build_sequence_candidate(const SequencePlannin
 
 std::unique_ptr<qwen3_5::detail::SequencePlannerImpl>
 make_sequence_planner_impl(const execution::Parameters& parameters, DeviceContext& device,
-                           const EngineOptions& options) {
+                           const EngineOptions& options,
+                           std::optional<std::size_t> measured_graph_allowance_bytes) {
     validate_target_options(parameters, device, options);
     SequencePlanningInputs inputs{
         .parameters           = &parameters,
@@ -918,6 +924,7 @@ make_sequence_planner_impl(const execution::Parameters& parameters, DeviceContex
         .multiprocessor_count = device.multiprocessor_count(),
         .context_cache        = options.context_cache,
     };
+    inputs.measured_graph_allowance_bytes = measured_graph_allowance_bytes;
     const std::uint32_t logical_pages = page_count(inputs.capacity);
     const std::uint32_t minimum_pages = std::max(logical_pages, inputs.max_concurrency);
     const std::uint64_t maximum_pages64 =

@@ -84,6 +84,7 @@ struct SequencePlanningInputs {
     bool causal_scoring               = false;
     int device                        = 0;
     std::int32_t multiprocessor_count = 0;
+    std::optional<std::size_t> measured_graph_allowance_bytes;
     ContextCacheOptions context_cache;
 };
 
@@ -118,7 +119,8 @@ struct SequencePlannerImpl {
 
 [[nodiscard]] std::unique_ptr<qwen3_5::detail::SequencePlannerImpl>
 make_sequence_planner_impl(const execution::Parameters& parameters, DeviceContext& device,
-                           const EngineOptions& options);
+                           const EngineOptions& options,
+                           std::optional<std::size_t> measured_graph_allowance_bytes = std::nullopt);
 [[nodiscard]] std::unique_ptr<SequencePlanImpl>
 finalize_sequence_plan_impl(std::unique_ptr<qwen3_5::detail::SequencePlannerImpl> planner,
                             std::uint32_t main_page_groups);

@@ -299,8 +299,36 @@ MemorySummary Program::memory_summary() const noexcept { return impl_->memory_su
 void Program::reset_memory_peaks() noexcept { impl_->reset_memory_peaks(); }
 
 SequencePlanner make_sequence_planner(const execution::Parameters& parameters,
-                                      DeviceContext& device, const EngineOptions& options) {
-    return SequencePlanner(detail::make_sequence_planner_impl(parameters, device, options));
+                                      DeviceContext& device, const EngineOptions& options,
+                                      std::optional<std::size_t> measured_graph_allowance_bytes) {
+    return SequencePlanner(detail::make_sequence_planner_impl(parameters, device, options,
+                                                              measured_graph_allowance_bytes));
+}
+
+std::size_t measure_cuda_graph_allocation_bytes(const execution::Parameters& parameters,
+                                               DeviceContext& device,
+                                               const EngineOptions& options) {
+    if (!options.use_cuda_graph) { return 0; }
+    auto calibration = options;
+    // Host backing does not affect graph topology; do not pin it during calibration.
+    calibration.context_cache.host_capacity_bytes = 0;
+    auto planner = make_sequence_planner(parameters, device, calibration);
+    const auto pages = planner.capacity_curve().minimum_main_page_groups;
+    auto plan = std::move(planner).finalize(pages);
+    const auto explicit_bytes = plan.device_reservation_bytes();
+    auto probe = std::make_unique<detail::ProgramImpl>(parameters, *plan.impl_, device,
+                                                       options.startup_observer);
+    device.synchronize();
+    std::size_t before = 0;
+    std::size_t total  = 0;
+    CUDA_CHECK(cudaMemGetInfo(&before, &total));
+    probe.reset();
+    device.synchronize();
+    std::size_t after = 0;
+    CUDA_CHECK(cudaMemGetInfo(&after, &total));
+    // Includes driver allocation rounding as well as releasable graph storage.
+    const auto released = after > before ? after - before : 0;
+    return released > explicit_bytes ? released - explicit_bytes : 0;
 }
 
 std::unique_ptr<Program> create_program(const execution::Parameters& parameters,

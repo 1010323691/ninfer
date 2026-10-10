@@ -12,7 +12,9 @@ SERVE="$DEPLOY/build/apps/ninfer-serve"
 MODEL="$DEPLOY/models/qwen3_8_27b_nvfp4.ninfer"
 PORT=18080
 MON_PORT=18081
-API_KEY=YOUR_API_KEY  # 替换为实际 API key
+[[ -f "$HOME/.config/ninfer/env.sh" ]] && source "$HOME/.config/ninfer/env.sh"
+API_KEY="${NINFER_API_KEY:-}"
+[[ -n "$API_KEY" ]] || fail "未设置环境变量 NINFER_API_KEY（可写入 ~/.config/ninfer/env.sh）。"
 source "$HOME/.config/ninfer/cuda-env.sh"
 [[ -x "$SERVE" ]] || fail "找不到引擎：$SERVE"
 [[ -f "$MODEL" ]] || fail "找不到模型：$MODEL"
